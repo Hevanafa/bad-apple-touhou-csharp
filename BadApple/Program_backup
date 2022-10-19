@@ -1,0 +1,191 @@
+﻿using System;
+using System.Drawing;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Drawing.Imaging;
+using System.Timers;
+
+namespace BadApple
+{
+    class BadApple
+    {
+        WMPLib.WindowsMediaPlayer musicPlayer = new WMPLib.WindowsMediaPlayer();
+        Timer t = new Timer(188); // considering the output latency of 12-14ms
+
+        // Source:
+        // https://stackoverflow.com/questions/26233781/detect-the-brightness-of-a-pixel-or-the-area-surrounding-it
+        double GetBrightness(Color color)
+        {
+            return (0.2126 * color.R + 0.7152 * color.G + 0.0722 * color.B);
+        }
+
+        // Brightness cells 0-15
+        byte[][][] frames;
+        string map = " .:;-=+*I%MW&B@#";
+
+        string[] renderedFrames;
+
+        public BadApple()
+        {
+            Console.Title = "Bad Apple - By Hevanafa (Mar 2021)";
+            Console.SetWindowSize(81, 65);
+
+            Console.Clear();
+            Console.SetCursorPosition(0, 0);
+
+            // First step
+            //var brightnessList = new List<double>();
+
+            //var bmp = new Bitmap("img60/0010.png");
+            //var dbmp = new DirectBitmap(bmp.Width, bmp.Height);
+            //using (var g = Graphics.FromImage(dbmp.Bitmap))
+            //    g.DrawImage(bmp, 0, 0);
+
+            //for (var b = 0; b < dbmp.Height; b++)
+            //    for (var a = 0; a < dbmp.Width; a++)
+            //    {
+            //        int brightness = (int)(GetBrightness(dbmp.GetPixel(a, b)) / 16);
+            //        if (!brightnessList.Contains(brightness))
+            //            brightnessList.Add(brightness);
+            //    }
+
+            //Console.WriteLine(string.Join(" ", brightnessList));
+
+
+
+            // Scan 1 image & also scan the pixels for the brightness map
+            //frames = new byte[1][][];
+            //var bmp = new Bitmap("img60/0010.png");
+            //var dbmp = new DirectBitmap(bmp.Width, bmp.Height);
+            //using (var g = Graphics.FromImage(dbmp.Bitmap))
+            //    g.DrawImage(bmp, 0, 0);
+
+            //frames[0] = new byte[bmp.Height][];
+            //for (var a = 0; a < bmp.Height; a++)
+            //    frames[0][a] = new byte[bmp.Width];
+
+            //for (var b = 0; b < dbmp.Height; b++)
+            //    for (var a = 0; a < dbmp.Width; a++)
+            //        frames[0][b][a] = (byte)(GetBrightness(dbmp.GetPixel(a, b)) / 16);
+
+            //Console.WriteLine(string.Join("\n", frames[0].Select(row => string.Join("", row.Select(c => map[c])))));
+
+            frames = new byte[imgCount + 1][][];
+            for (var idx = 1; idx <= imgCount; idx++)
+            {
+                var bmp = new Bitmap("img60/" + (idx+"").PadLeft(4, '0') + ".png");
+                var dbmp = new DirectBitmap(bmp.Width, bmp.Height);
+                using (var g = Graphics.FromImage(dbmp.Bitmap))
+                    g.DrawImage(bmp, 0, 0);
+
+                // init frame
+                frames[idx] = new byte[bmp.Height][];
+                for (var a = 0; a < bmp.Height; a++)
+                    frames[idx][a] = new byte[bmp.Width];
+
+                // Fill frame with brightness per pixel 0-15
+                for (var b = 0; b < dbmp.Height; b++)
+                    for (var a = 0; a < dbmp.Width; a++)
+                        frames[idx][b][a] = (byte)(GetBrightness(dbmp.GetPixel(a, b)) / 16);
+
+                bmp.Dispose();
+                dbmp.Dispose();
+            }
+
+            renderedFrames = new string[1095];
+            for (var idx = 1; idx < 1095; idx++)
+                renderedFrames[idx] = string.Join("\n", frames[idx].Select(row => string.Join("", row.Select(c => map[c]))));
+
+            musicPlayer.URL = "music/bad apple.mp3";
+            musicPlayer.controls.play();
+
+            t.Elapsed += T_Elapsed;
+
+            t.Start();
+
+            Console.ReadLine();
+        }
+
+        DateTime beginDraw;
+
+        int imgIdx = 0;
+        int imgCount = 1094;
+
+        private void T_Elapsed(object sender, ElapsedEventArgs e)
+        {
+            beginDraw = DateTime.Now;
+
+            if (imgIdx < imgCount - 1)
+                imgIdx++;
+            else
+            {
+                t.Stop();
+                Console.Clear();
+                return;
+            }
+
+            Console.SetCursorPosition(0, 0);
+            Console.WriteLine(renderedFrames[imgIdx + 1]);
+
+            Console.WriteLine($"Frame: {imgIdx}/{imgCount}\nLatency: {DateTime.Now.Subtract(beginDraw).TotalMilliseconds}ms");
+        }
+    }
+
+    // Done: make a bad apple clone
+    // Done: scan 1 image
+    // Done: load the images
+    // Done: scan the images
+    // Done: simulate the image cycle with 5 FPS
+
+    // Source:
+    // https://stackoverflow.com/questions/24701703/c-sharp-faster-alternatives-to-setpixel-and-getpixel-for-bitmaps-for-windows-f
+    public class DirectBitmap : IDisposable
+    {
+        public Bitmap Bitmap { get; private set; }
+        public int[] Bits { get; private set; }
+        public bool Disposed { get; private set; }
+        public int Height { get; private set; }
+        public int Width { get; private set; }
+
+        protected GCHandle BitsHandle { get; private set; }
+
+        public DirectBitmap(int width, int height)
+        {
+            Width = width;
+            Height = height;
+            Bits = new int[width * height];
+            BitsHandle = GCHandle.Alloc(Bits, GCHandleType.Pinned);
+            Bitmap = new Bitmap(width, height, width * 4, PixelFormat.Format32bppPArgb, BitsHandle.AddrOfPinnedObject());
+        }
+
+        public void SetPixel(int x, int y, Color colour)
+        {
+            int index = x + (y * Width);
+            int col = colour.ToArgb();
+
+            Bits[index] = col;
+        }
+
+        public Color GetPixel(int x, int y)
+        {
+            int index = x + (y * Width);
+            int col = Bits[index];
+            Color result = Color.FromArgb(col);
+
+            return result;
+        }
+
+        public void Dispose()
+        {
+            if (Disposed) return;
+            Disposed = true;
+            Bitmap.Dispose();
+            BitsHandle.Free();
+        }
+    }
+
+    class Program
+    {
+        static void Main() { new BadApple(); Console.ReadLine(); }
+    }
+}
